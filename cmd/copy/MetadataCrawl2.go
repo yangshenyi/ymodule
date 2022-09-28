@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -91,7 +90,7 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 			}
 			modtext, _ = ioutil.ReadAll(resp.Body)
 			//parse mod file
-			lines = strings.Fields(string(modtext))
+			lines = strings.Split(string(modtext), "\n")
 		}
 
 		//fmt.Println(lines)
@@ -99,8 +98,15 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		} else if len(lines) > 2 {
 			flagList := make([]bool, 4)
 			for _, line := range lines {
-				var words []string = strings.Fields(line)
-
+				var words []string = make([]string, 0)
+				for _, val := range strings.Split(line, " ") {
+					if len(val) > 0 && val != " " && val != "\t" {
+						if val[0] == '\t' {
+							val = val[1:]
+						}
+						words = append(words, val)
+					}
+				}
 				if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
 					continue
 				} else if words[0] == "module" {
@@ -214,6 +220,10 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		if modInfo[index].HasValidMod == 1 {
 			//fmt.Println("--------------", modInfo[index])
 			modulePath_ := modInfo[index].Mod.ModulePath
+			if len(modulePath_) == 0 {
+				modulePath_ = strings.Split(lines[0], "\t")[1]
+				modInfo[index].Mod.ModulePath = modulePath_
+			}
 			if modulePath_[0:1] == "\"" {
 				modulePath_ = modulePath_[1 : len(modulePath_)-1]
 			}
@@ -246,7 +256,7 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 func main() {
 	//set core
 	runtime.GOMAXPROCS(runtime.NumCPU()) // 12 cores on my PC
-	maxThread := 8
+	//maxThread := 8
 	//Connect to mongodb
 	var (
 		client     *mongo.Client
@@ -264,7 +274,7 @@ func main() {
 		}
 	}()
 	db = client.Database("godep")
-	collection = db.Collection("modData")
+	collection = db.Collection("depdata")
 
 	//set proxy
 	proxyUrl := "http://127.0.0.1:7890"
@@ -279,45 +289,170 @@ func main() {
 	}
 
 	//initialize the crawl location
-	lastModCacheTime := "2022-08-25T09:15:51.774796Z"
+	//lastModCacheTime := "2022-08-25T09:15:51.774796Z"
+	/*
+		for {
 
-	for {
-		resp, err := httpClient.Get("https://index.golang.org/index?since=" + lastModCacheTime)
-		if err != nil {
-			expHandler(lastModCacheTime, err)
-			for numOfThread > 0 {
-			}
-			return
-		}
-		resp.Close = true
-		var modIndexes []dep
-		dec := json.NewDecoder(resp.Body)
-		for dec.More() {
-			var modIndex dep
-			if err := dec.Decode(&modIndex); err != nil {
+
+			resp, err := httpClient.Get("https://index.golang.org/index?since=" + lastModCacheTime)
+			if err != nil {
 				expHandler(lastModCacheTime, err)
 				for numOfThread > 0 {
 				}
 				return
 			}
-			modIndexes = append(modIndexes, modIndex)
-		}
-		//index done
-		if len(modIndexes) == 1 {
-			break
-		}
-		lastModCacheTime = modIndexes[len(modIndexes)-1].CacheTime
+			resp.Close = true
+			var modIndexes []dep
+			dec := json.NewDecoder(resp.Body)
+			for dec.More() {
+				var modIndex dep
+				if err := dec.Decode(&modIndex); err != nil {
+					expHandler(lastModCacheTime, err)
+					for numOfThread > 0 {
+					}
+					return
+				}
+				modIndexes = append(modIndexes, modIndex)
+			}
+			//index done
+			if len(modIndexes) == 1 {
+				break
+			}
+			lastModCacheTime = modIndexes[len(modIndexes)-1].CacheTime
+	*/
 
-		//limit the num of goroutine
+	file, err := os.Open("./left2.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	lines := strings.Split(string(content), "\n")
+	var modIndexes []dep
+	for i := 0; i < len(lines)-1; i += 1 {
+		var temp dep
+		temp.Path = strings.Fields(lines[i])[0]
+		temp.Version = strings.Fields(lines[i])[1]
+		temp.CacheTime = strings.Fields(lines[i])[2]
+		//fmt.Println(temp.CacheTime[len(temp.CacheTime)-1])
+		modIndexes = append(modIndexes, temp)
+	}
+
+	//limit the num of goroutine
+	/*
 		for numOfThread >= maxThread {
 		}
 		muxThread.Lock()
 		numOfThread++
 		muxThread.Unlock()
-		go parse(modIndexes[1:], httpClient, collection)
+	*/
+	for i := 0; i < 12; i++ {
+		muxThread.Lock()
+		numOfThread++
+		muxThread.Unlock()
+		go parse(modIndexes[i*4000:i*4000+4000], httpClient, collection)
 	}
+	muxThread.Lock()
+	numOfThread++
+	muxThread.Unlock()
+	go parse(modIndexes[12*4000:], httpClient, collection)
+
+	//}
 
 	//no parsing goroutine exists, then all done
 	for numOfThread > 0 {
 	}
 }
+
+/*
+	create table if not exists `goversion`(
+		`id` int unsigned auto_increment,
+		`path` varchar(100) not null,
+		`version` varchar(100) not null,
+		`timestamp` varchar(40) not null,
+		`publishtime` varchar(40) not null,
+		`isGopackage`    boolean default false,
+		`isVersionOnDev` boolean default false,
+		`validgomod` boolean default false,
+		primary key(id)
+		)ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=UTF8MB4 ;
+*/
+
+/*
+func Parse(mod []module, client *http.Client, quit chan bool, db *sql.DB) {
+	stmt, err := db.Prepare("INSERT INTO goversion(path, version, timestamp, publishtime, isGopackage, isVersionOnDev, validgomod) VALUES(?,?,?,?,?,?,?)")
+	if err != nil {
+		log.Fatal(err, "!!!")
+	}
+	defer stmt.Close()
+
+	for _, val := range mod {
+		//package on pkg.go.dev？
+		resp, err := client.Head("https://pkg.go.dev/" + val.Path)
+		if err != nil {
+			log.Fatal("[Error]", err, 1, val)
+		}
+		if resp.StatusCode == 200 {
+			val.IsPackageOnDev = true
+			respMod, errMod := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
+			if errMod != nil {
+				log.Fatal("[Error]", err, 2, val)
+			}
+
+			if respMod.StatusCode == 200 {
+				bytesmod, _ := ioutil.ReadAll(respMod.Body)
+				s := string(bytesmod)
+				if len(strings.Split(s, " ")) > 2 {
+					val.ValidMod = true
+				}
+			}
+			respMod.Body.Close()
+
+			//Publish Time
+			//$base/$module/@v/$version.info
+			respPubTime, errPubTime := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".info")
+			if errPubTime != nil {
+				log.Fatal("[Error]", err, 3, val)
+			}
+
+			if respPubTime.StatusCode == 200 {
+				dec := json.NewDecoder(respPubTime.Body)
+				var temp publishTime
+				dec.Decode(&temp)
+				val.publishTime = temp.Time
+			}
+			respPubTime.Body.Close()
+
+
+			//version on pkg.go.dev?
+			respVersion, errVersion := client.Head("https://pkg.go.dev/" + val.Path + "@" + val.Version)
+			if errVersion != nil {
+				log.Fatal("[Error]", err, 4, val)
+			}
+			if respVersion.StatusCode == 200 {
+				val.IsVersionOnDev = true
+				/*
+					//valid mod file?
+					doc, err := goquery.NewDocumentFromReader(respVersion.Body)
+					if err != nil {
+						log.Fatal(err)
+					}
+					doc.Find("ul.UnitMeta-details").Each(func(i int, s *goquery.Selection) {
+						if _, ok := s.Find("li").Eq(0).Find("a").Attr("href"); ok {
+							val.ValidMod = true
+						}
+					})
+			}
+			respVersion.Body.Close()
+		}
+		resp.Body.Close()
+
+		_, err1 := stmt.Exec(val.Path, val.Version, val.Timestamp, val.publishTime, val.IsPackageOnDev, val.IsVersionOnDev, val.ValidMod)
+		if err1 != nil {
+			log.Fatal(err, 6, val)
+		}
+
+		//fmt.Println(val)
+	}
+	quit <- true
+}*/
