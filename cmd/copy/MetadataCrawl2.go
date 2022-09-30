@@ -71,12 +71,11 @@ func trans(src string) string {
 	return ret
 }
 
-//each time, we parse 1999 records
+//each time, we parse 2000 records
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
 	for index, val := range modInfo {
-		fmt.Println(modInfo[index].Path, index)
 		resp, err := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
@@ -93,20 +92,12 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 			lines = strings.Split(string(modtext), "\n")
 		}
 
-		//fmt.Println(lines)
 		if modInfo[index].HasValidMod == -3 {
 		} else if len(lines) > 2 {
 			flagList := make([]bool, 4)
 			for _, line := range lines {
-				var words []string = make([]string, 0)
-				for _, val := range strings.Split(line, " ") {
-					if len(val) > 0 && val != " " && val != "\t" {
-						if val[0] == '\t' {
-							val = val[1:]
-						}
-						words = append(words, val)
-					}
-				}
+				var words []string = strings.Fields(line)
+				//fmt.Println(modInfo[index])
 				if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
 					continue
 				} else if words[0] == "module" {
@@ -220,10 +211,6 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		if modInfo[index].HasValidMod == 1 {
 			//fmt.Println("--------------", modInfo[index])
 			modulePath_ := modInfo[index].Mod.ModulePath
-			if len(modulePath_) == 0 {
-				modulePath_ = strings.Split(lines[0], "\t")[1]
-				modInfo[index].Mod.ModulePath = modulePath_
-			}
 			if modulePath_[0:1] == "\"" {
 				modulePath_ = modulePath_[1 : len(modulePath_)-1]
 			}
@@ -245,7 +232,7 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		newValue = append(newValue, v)
 	}
 	muxDB.Lock()
-	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0])
+	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0], modInfo[0].CacheTime)
 	collection.InsertMany(context.TODO(), newValue)
 	muxDB.Unlock()
 	muxThread.Lock()
@@ -274,7 +261,7 @@ func main() {
 		}
 	}()
 	db = client.Database("godep")
-	collection = db.Collection("depdata")
+	collection = db.Collection("modData")
 
 	//set proxy
 	proxyUrl := "http://127.0.0.1:7890"
@@ -321,7 +308,7 @@ func main() {
 			lastModCacheTime = modIndexes[len(modIndexes)-1].CacheTime
 	*/
 
-	file, err := os.Open("./left2.txt")
+	file, err := os.Open("./left.txt")
 	if err != nil {
 		panic(err)
 	}
@@ -346,22 +333,8 @@ func main() {
 		numOfThread++
 		muxThread.Unlock()
 	*/
-	for i := 0; i < 12; i++ {
-		muxThread.Lock()
-		numOfThread++
-		muxThread.Unlock()
-		go parse(modIndexes[i*4000:i*4000+4000], httpClient, collection)
-	}
-	muxThread.Lock()
-	numOfThread++
-	muxThread.Unlock()
-	go parse(modIndexes[12*4000:], httpClient, collection)
+	parse(modIndexes, httpClient, collection)
 
-	//}
-
-	//no parsing goroutine exists, then all done
-	for numOfThread > 0 {
-	}
 }
 
 /*

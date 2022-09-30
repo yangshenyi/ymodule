@@ -3,17 +3,17 @@ package loadmod
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
+	"strings"
+	//"errors"
+	"golang.org/x/mod/semver"
 	"github.com/yangshenyi/ymodule/mymvs"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/mod/module"
-	"golang.org/x/mod/semver"
 )
-
 type Version struct {
 	Path    string `json:"Path" bson:"Path"`
 	Version string `json:"Version" bson:"Version"`
@@ -126,6 +126,11 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	replaceInfo := make(map[module.Version]module.Version, len(targetModInfo.Mod.Replace))
 	for _, line := range targetModInfo.Mod.Replace {
 		words := strings.Fields(line)
+		for ix, v := range words {
+			if v == "//" {
+				words = words[:ix]
+			}
+		}
 		if words[0] == "//" {
 			continue
 		} else if words[1] == "=>" {
@@ -169,12 +174,15 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	// load transitive dependency
 	// add successor nodes of selected node with replace and exclude applied
 	loadOne := func(m module.Version) ([]module.Version, bool, error) {
+		/*if m.Path == target.Path {
+			return nil, false, errors.New("Same Path as Target")
+		}*/
 		_, actual := replacement(m, replaceInfo)
 		// load current module's mod info
 		var currentModInfo modInfo = modInfo{}
 		//fmt.Println("*****", m, "&&", actual)
-		if err = collection.FindOne(context.TODO(), bson.M{"Path": m.Path, "Version": m.Version}).Decode(&currentModInfo); err != nil {
-			fmt.Println(err, "read current module", m.Path, m.Version, "=>", actual.Path, actual.Version, "mod file fail! [1]")
+		if err = collection.FindOne(context.TODO(), bson.M{"Path": actual.Path, "Version": actual.Version}).Decode(&currentModInfo); err != nil {
+			// fmt.Println(err, "read current module", m.Path, m.Version, "=>", actual.Path, actual.Version, "mod file fail! [1]")
 			return nil, false, err
 		}
 
@@ -223,20 +231,21 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 // are relative to the workspace directory (in workspace mode) or to the module's
 // directory (in module mode, as they already are).
 func canonicalizeReplacePath(r module.Version, modRoot string) module.Version {
-	if filepath.IsAbs(r.Path) || r.Version != "" {
-		return r
+	if filepath.IsAbs(r.Path) || r.Version != "" {e).
+func canonicalizeReplacePath(r module.Version,modRoot string) module.Version {
+	if filepath.IsAbs(r.Path) || r.Version != ""{
+		returnrh.IsAbs(r.Path) || r.Version != "" {
+		turn rh.IsAbs(r.Path) || r.Version != "" {
+		turn r
 	}
-	workFilePath := WorkFilePath()
-	if workFilePath == "" {
-		return r
+	workFilePath := WorkFiPath(
+	if workFePath == ""modRoot, r.Path)
+	i re err := filepath.Rel(filepath.Dir(workFilePat, abs); err == nil
+		urn module.Version{Path: rel, Version: r.Version
 	}
-	abs := filepath.Join(modRoot, r.Path)
-	if rel, err := filepath.Rel(filepath.Dir(workFilePath), abs); err == nil {
-		return module.Version{Path: rel, Version: r.Version}
-	}
-	// We couldn't make the version's path relative to the workspace's path,
-	// so just return the absolute path. It's the best we can do.
-	return module.Version{Path: abs, Version: r.Version}
-}
+	// We couldn't make the version's path relative o the worksce's path
+// so just return the absolute path. It's the best can do
+trn module.Version{Path: abs, Version: r.Version
+
 
 */

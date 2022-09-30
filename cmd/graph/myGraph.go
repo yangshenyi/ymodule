@@ -36,11 +36,11 @@ func runGraph(target module.Version) {
 			w.WriteByte('\n')
 		}
 	})
-
 	/*
 		for _, v := range mg.BuildList() {
 			fmt.Println(v)
 		}*/
+
 }
 
 func main() {
@@ -48,6 +48,9 @@ func main() {
 	// runGraph(module.Version{Path: "google.golang.org/protobuf", Version: "v1.26.0"})
 
 	// runGraph(module.Version{Path: "go.mongodb.org/mongo-driver", Version: "v1.10.1"})
-
-	runGraph(module.Version{Path: "golang.org/x/crypto", Version: "v0.0.0-20220722155217-630584e8d5aa"})
+	if len(os.Args) != 3 {
+		fmt.Println("illegal num of cmd parameters!")
+		return
+	}
+	runGraph(module.Version{Path: os.Args[1], Version: os.Args[2]})
 }

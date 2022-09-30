@@ -76,8 +76,8 @@ func trans(src string) string {
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
+	// for index, val := range modInfo[1:] { wssb ************************************
 	for index, val := range modInfo {
-		fmt.Println(modInfo[index].Path, index)
 		resp, err := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
@@ -88,19 +88,19 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		} else {
 			if resp.StatusCode != 200 {
 				modInfo[index].HasValidMod = 0
+				fmt.Println(modInfo[index])
 			}
 			modtext, _ = ioutil.ReadAll(resp.Body)
 			//parse mod file
-			lines = strings.Fields(string(modtext))
+			lines = strings.Split(string(modtext), "\n")
 		}
 
-		//fmt.Println(lines)
 		if modInfo[index].HasValidMod == -3 {
 		} else if len(lines) > 2 {
 			flagList := make([]bool, 4)
 			for _, line := range lines {
 				var words []string = strings.Fields(line)
-
+				//fmt.Println(modInfo[index])
 				if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
 					continue
 				} else if words[0] == "module" {
@@ -231,11 +231,11 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	//store into DB
 
 	newValue := make([]interface{}, 0)
-	for _, v := range modInfo {
+	for _, v := range modInfo[1:] {
 		newValue = append(newValue, v)
 	}
 	muxDB.Lock()
-	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0])
+	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0], modInfo[0].CacheTime)
 	collection.InsertMany(context.TODO(), newValue)
 	muxDB.Unlock()
 	muxThread.Lock()
@@ -279,9 +279,15 @@ func main() {
 	}
 
 	//initialize the crawl location
-	lastModCacheTime := "2022-08-25T09:15:51.774796Z"
+	lastModCacheTime := "2022-09-15T21:14:59.11831Z"
 
 	for {
+		if lastModCacheTime > "2022-09-16" {
+			for numOfThread > 0 {
+			}
+			fmt.Println("\n\n********************", lastModCacheTime)
+			return
+		}
 		resp, err := httpClient.Get("https://index.golang.org/index?since=" + lastModCacheTime)
 		if err != nil {
 			expHandler(lastModCacheTime, err)
@@ -307,14 +313,13 @@ func main() {
 			break
 		}
 		lastModCacheTime = modIndexes[len(modIndexes)-1].CacheTime
-
 		//limit the num of goroutine
 		for numOfThread >= maxThread {
 		}
 		muxThread.Lock()
 		numOfThread++
 		muxThread.Unlock()
-		go parse(modIndexes[1:], httpClient, collection)
+		go parse(modIndexes, httpClient, collection)
 	}
 
 	//no parsing goroutine exists, then all done
