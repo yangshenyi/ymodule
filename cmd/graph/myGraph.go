@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	//"bufio"
 	"fmt"
 	"os"
 
@@ -9,37 +9,47 @@ import (
 	"golang.org/x/mod/module"
 )
 
+
 func runGraph(target module.Version) {
-	mg, ok := loadmod.LoadModGraph(target)
+	mg, ok, info := loadmod.LoadModGraph(target)
 	if !ok {
-		fmt.Println("load Graph fail[!]")
+		fmt.Println("load Graph fail[!]", info)
 
 	}
-
-	w := bufio.NewWriter(os.Stdout)
-	defer w.Flush()
-
-	format := func(m module.Version) {
-		w.WriteString(m.Path)
-		if m.Version != "" {
-			w.WriteString("@")
-			w.WriteString(m.Version)
-		}
-	}
-
-	mg.WalkBreadthFirst(func(m module.Version) {
-		reqs, _ := mg.RequiredBy(m)
-		for _, r := range reqs {
-			format(m)
-			w.WriteByte(' ')
-			format(r)
-			w.WriteByte('\n')
-		}
-	})
 	/*
-		for _, v := range mg.BuildList() {
-			fmt.Println(v)
-		}*/
+		w := bufio.NewWriter(os.Stdout)
+		defer w.Flush()
+
+		format := func(m module.Version) {
+			w.WriteString(m.Path)
+			if m.Version != "" {
+				w.WriteString("@")
+				w.WriteString(m.Version)
+			}
+		}
+
+		mg.WalkBreadthFirst(func(m module.Version) {
+			reqs, _ := mg.RequiredBy(m)
+			for _, r := range reqs {
+				format(m)
+				w.WriteByte(' ')
+				format(r)
+				w.WriteByte('\n')
+			}
+		})*/
+	fmt.Println(*info, "\n\n")
+	//fmt.Println(mg. Selected("null"))
+	
+	for _, v := range mg.BuildList() {
+		if k, ok := (*info)[v]; ok {
+			fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
+		} else if k, ok := (*info)[module.Version{Path: v.Path, Version: ""}]; ok {
+			fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
+		} else {
+			fmt.Println(v.Path, v.Version)
+		}
+
+	}
 
 }
 
@@ -52,5 +62,6 @@ func main() {
 		fmt.Println("illegal num of cmd parameters!")
 		return
 	}
+
 	runGraph(module.Version{Path: os.Args[1], Version: os.Args[2]})
 }

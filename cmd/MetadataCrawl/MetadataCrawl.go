@@ -37,9 +37,10 @@ type dep struct {
 		Replace      []string `bson:"Replace"`
 		Retract      []string `bson:"Retract"`
 	} `bson:"mod"`
-	HasValidMod int  `bson:"HasValidMod"`
-	IsValidGo   bool `bson:"IsValidGo"`
-	IsOnPkg     bool `bson:"IsOnPkg"`
+	HasValidMod int `bson:"HasValidMod"`
+	//IsValidGo   bool `bson:"IsValidGo"`
+	IsOnPkg bool   `bson:"IsOnPkg"`
+	modFile string `bson:"modFile"`
 }
 
 var numOfThread int = 0
@@ -76,9 +77,8 @@ func trans(src string) string {
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
-	// for index, val := range modInfo[1:] { wssb ************************************
 	for index, val := range modInfo {
-		resp, err := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
+		resp, err := client.Get("https://goproxy.cn/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
 		var lines []string
@@ -87,13 +87,20 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 			modInfo[index].HasValidMod = -3
 		} else {
 			if resp.StatusCode != 200 {
-				modInfo[index].HasValidMod = 0
-				fmt.Println(modInfo[index])
+				resp, err = client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
+				if err != nil {
+					expHandler(modInfo[0].CacheTime, err)
+					modInfo[index].HasValidMod = -3
+				} else {
+					modInfo[index].HasValidMod = 0
+					fmt.Println(modInfo[index])
+				}
 			}
 			modtext, _ = ioutil.ReadAll(resp.Body)
 			//parse mod file
 			lines = strings.Split(string(modtext), "\n")
 		}
+		modInfo[index].modFile = string(modtext)
 
 		if modInfo[index].HasValidMod == -3 {
 		} else if len(lines) > 2 {
@@ -209,7 +216,7 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		}
 		resp.Body.Close()
 
-		modInfo[index].IsValidGo = modInfo[index].IsOnPkg || modInfo[index].HasValidMod == 1
+		//modInfo[index].IsValidGo = modInfo[index].IsOnPkg || modInfo[index].HasValidMod == 1
 		//Path and modulePath is different
 		if modInfo[index].HasValidMod == 1 {
 			//fmt.Println("--------------", modInfo[index])
@@ -279,10 +286,10 @@ func main() {
 	}
 
 	//initialize the crawl location
-	lastModCacheTime := "2022-09-15T21:14:59.11831Z"
+	lastModCacheTime := "2022-08-25T23:59:55.333355Z"
 
 	for {
-		if lastModCacheTime > "2022-09-16" {
+		if lastModCacheTime > "2022-08-31" {
 			for numOfThread > 0 {
 			}
 			fmt.Println("\n\n********************", lastModCacheTime)

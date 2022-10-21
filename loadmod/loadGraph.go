@@ -2,18 +2,26 @@ package loadmod
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"time"
-
+	"path/filepath"
 	"strings"
-	//"errors"
-	"golang.org/x/mod/semver"
+	"time"
+	"io/ioutil"
+	"log"
+
 	"github.com/yangshenyi/ymodule/mymvs"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+
+	"net/http"
+	"net/url"
+	"crypto/tls"
 )
+
 type Version struct {
 	Path    string `json:"Path" bson:"Path"`
 	Version string `json:"Version" bson:"Version"`
@@ -54,10 +62,56 @@ func replacement(mod module.Version, replace map[module.Version]module.Version) 
 	if r, ok := replace[mod]; ok {
 		return mod.Version, r
 	}
-	if r, ok := replace[module.Version{Path: mod.Path}]; ok {
+	if r, ok := replace[module.Version{Path: mod.Path, Version:""}]; ok {
 		return "", r
 	}
 	return "", mod
+}
+
+func parseModFile(modFile string, recv * modInfo){
+		lines := strings.Split(string(modFile), "\n")
+		if len(lines)<2 {
+			return
+		}
+		flag := false
+		for _, line := range lines {
+				var words []string = strings.Fields(line)
+				//fmt.Println(modInfo[index])
+				if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
+					continue
+				} else if words[0] == "module" {
+					recv.Mod.ModulePath = words[1]
+				} else if words[0] == "go" {
+					recv.Mod.GoVersion = words[1]
+				} else if words[0] == ")" {
+					flag = false
+				} else if flag {
+					if len(words) == 1 {
+						log.Fatal("local replace: resolve fail[0]")
+						break
+					} else if len(words) == 2 {
+						recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[0], Version: words[1]})
+					} else {
+						recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[0], Version: words[1]})
+					}
+				} else if words[0] == "require" {
+					if words[1] == "(" {
+						flag = true
+					} else if words[1] == "()" {
+						continue
+					} else {
+						if len(words) < 3 {
+							log.Fatal("local replace: resolve fail[1]")
+							break
+						}
+						if len(words) == 3 {
+							recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[1], Version: words[2]})
+						} else {
+							recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[1], Version: words[2]})
+						}
+					}
+				} 
+		}
 }
 
 func getRequiredList(modinfo modInfo, excludeInfo map[module.Version]bool) []module.Version {
@@ -92,7 +146,7 @@ func getRequiredList(modinfo modInfo, excludeInfo map[module.Version]bool) []mod
 	return list
 }
 
-func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
+func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Version]module.Version) {
 
 	// connect mongodb
 	var (
@@ -103,7 +157,7 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	)
 	if client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI("mongodb://localhost:27017").SetConnectTimeout(10*time.Second)); err != nil {
 		fmt.Print(err)
-		return nil, false
+		return nil, false, nil
 	}
 	defer func() {
 		if err := client.Disconnect(context.TODO()); err != nil {
@@ -117,7 +171,7 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	var targetModInfo modInfo = modInfo{}
 	if err = collection.FindOne(context.TODO(), bson.M{"Path": target.Path, "Version": target.Version}).Decode(&targetModInfo); err != nil {
 		fmt.Println(err, "read main module mod file fail! [1]")
-		return nil, false
+		return nil, false, nil
 	}
 
 	//fmt.Println("success", targetModInfo)
@@ -135,21 +189,21 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 			continue
 		} else if words[1] == "=>" {
 			if len(words) == 3 {
-				fmt.Println("Replace by LocalPath [!]")
-				return nil, false
+				//fmt.Println("Replace by LocalPath [!]")
+				replaceInfo[module.Version{Path: words[0], Version: ""}] = module.Version{Path: words[2], Version: ""}
 			} else if len(words) == 4 {
 				replaceInfo[module.Version{Path: words[0], Version: ""}] = module.Version{Path: words[2], Version: words[3]}
 			}
 		} else if words[2] == "=>" {
 			if len(words) == 4 {
-				fmt.Println("Replace by LocalPath [!]")
-				return nil, false
+				//fmt.Println("Replace by LocalPath [!]")
+				replaceInfo[module.Version{Path: words[0], Version: words[1]}] = module.Version{Path: words[3], Version: ""}
 			} else if len(words) == 5 {
 				replaceInfo[module.Version{Path: words[0], Version: words[1]}] = module.Version{Path: words[3], Version: words[4]}
 			}
 		} else {
 			fmt.Println("Replace resolve fail")
-			return nil, false
+			return nil, false, nil
 		}
 	}
 	// parse exclude info into a map
@@ -163,7 +217,13 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	// does main module enable prune ?
 	pruning := pruningForGoVersion(targetModInfo.Mod.GoVersion)
 	// add main module's explicit requirements into dependency graph
-	roots := getRequiredList(targetModInfo, excludeInfo)
+	roots_ := getRequiredList(targetModInfo, excludeInfo)
+	var roots []module.Version
+	for _, v := range roots_ {
+		if v.Path != target.Path {
+			roots = append(roots, v)
+		}
+	}
 	module.Sort(roots)
 	mg.Require(module.Version{Path: target.Path, Version: ""}, roots)
 
@@ -173,17 +233,87 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 	//expandingQueue := make(map[module.Version]bool, len(roots))
 	// load transitive dependency
 	// add successor nodes of selected node with replace and exclude applied
+	
 	loadOne := func(m module.Version) ([]module.Version, bool, error) {
-		/*if m.Path == target.Path {
-			return nil, false, errors.New("Same Path as Target")
-		}*/
 		_, actual := replacement(m, replaceInfo)
+
 		// load current module's mod info
 		var currentModInfo modInfo = modInfo{}
+
 		//fmt.Println("*****", m, "&&", actual)
-		if err = collection.FindOne(context.TODO(), bson.M{"Path": actual.Path, "Version": actual.Version}).Decode(&currentModInfo); err != nil {
-			// fmt.Println(err, "read current module", m.Path, m.Version, "=>", actual.Path, actual.Version, "mod file fail! [1]")
-			return nil, false, err
+		if actual.Version != "" {
+			if err = collection.FindOne(context.TODO(), bson.M{"Path": actual.Path, "Version": actual.Version}).Decode(&currentModInfo); err != nil {
+				fmt.Println(err, "read current module", m.Path, m.Version, "=>", actual.Path, actual.Version, "mod file fail! [1]")
+				return nil, false, err
+			}
+		// resolve local path
+		}else{
+			var finalPath string = ""
+			if filepath.IsAbs(actual.Path) {
+				fmt.Println("abs")
+				return nil, false, errors.New("!")
+			}else {
+				//fmt.Println(target.Path)
+				urlPath := target.Path
+				words := strings.Split(urlPath, "/")
+				if words[0]!="github.com" {
+					// 还可以在 pkg 上查一下，获取 github 仓库 url
+					fmt.Println("??????")
+					return nil, false, errors.New("!")
+				}
+
+				// consider virtual Path
+				flagVirtual := true
+				if words[len(words)-1][0] == 'V' {
+					for _, v :=range words[len(words)-1][1:] {
+						if v < '0' && v>'9'{
+							flagVirtual = false
+							break
+						}
+					}
+				} else{
+					flagVirtual = false
+				}
+
+				if flagVirtual {
+					urlPath = strings.Join(words[:len(words)-1], "/")
+				}
+
+				finalPath = strings.Join(strings.Split(filepath.Join(urlPath, actual.Path), "\\"), "/")
+				//fmt.Println(finalPath)
+
+				//set proxy
+				proxyUrl := "http://127.0.0.1:7890"
+				proxy, _ := url.Parse(proxyUrl)
+				tr := &http.Transport{
+					Proxy:           http.ProxyURL(proxy),
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+				httpClient := &http.Client{
+					Transport: tr,
+					Timeout:   time.Second * 120,
+				}
+				
+				var finalVersion string
+				if v := strings.Split(target.Version, "-"); len(v)>2 {
+					finalVersion = v[len(v)-1]
+				} else if v:= strings.Split(target.Version, "+"); len(v) > 1{
+					finalVersion = v[0]
+				} else{
+					finalVersion = target.Version
+				}
+				//fmt.Println("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
+				resp, _ := httpClient.Get("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
+				// consider subdirectory
+				if flagVirtual && resp.StatusCode != 200 {
+					finalPath = strings.Join(strings.Split(filepath.Join(target.Path, actual.Path), "\\"), "/")
+					resp, _ = httpClient.Get("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
+				}
+				
+				modFile, _ := ioutil.ReadAll(resp.Body)
+				fmt.Println(string(modFile))
+				parseModFile(string(modFile), &currentModInfo)
+			}
 		}
 
 		requiredList := getRequiredList(currentModInfo, excludeInfo)
@@ -221,31 +351,6 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool) {
 		//fmt.Println("((((((((", m)
 		enqueue(m, pruning)
 	}
-
-	return mg, true
+	
+	return mg, true, &replaceInfo
 }
-
-/*
-
-// canonicalizeReplacePath ensures that relative, on-disk, replaced module paths
-// are relative to the workspace directory (in workspace mode) or to the module's
-// directory (in module mode, as they already are).
-func canonicalizeReplacePath(r module.Version, modRoot string) module.Version {
-	if filepath.IsAbs(r.Path) || r.Version != "" {e).
-func canonicalizeReplacePath(r module.Version,modRoot string) module.Version {
-	if filepath.IsAbs(r.Path) || r.Version != ""{
-		returnrh.IsAbs(r.Path) || r.Version != "" {
-		turn rh.IsAbs(r.Path) || r.Version != "" {
-		turn r
-	}
-	workFilePath := WorkFiPath(
-	if workFePath == ""modRoot, r.Path)
-	i re err := filepath.Rel(filepath.Dir(workFilePat, abs); err == nil
-		urn module.Version{Path: rel, Version: r.Version
-	}
-	// We couldn't make the version's path relative o the worksce's path
-// so just return the absolute path. It's the best can do
-trn module.Version{Path: abs, Version: r.Version
-
-
-*/
