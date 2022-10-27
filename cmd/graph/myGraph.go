@@ -37,7 +37,7 @@ func runGraph(target module.Version) {
 				w.WriteByte('\n')
 			}
 		})*/
-	fmt.Println(*info, "\n\n")
+	//fmt.Println(*info, "\n\n")
 	//fmt.Println(mg. Selected("null"))
 	
 	for _, v := range mg.BuildList() {

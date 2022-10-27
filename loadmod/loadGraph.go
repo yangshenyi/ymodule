@@ -256,15 +256,29 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 				//fmt.Println(target.Path)
 				urlPath := target.Path
 				words := strings.Split(urlPath, "/")
+
+				//set proxy
+				proxyUrl := "http://127.0.0.1:7890"
+				proxy, _ := url.Parse(proxyUrl)
+				tr := &http.Transport{
+					Proxy:           http.ProxyURL(proxy),
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+				httpClient := &http.Client{
+					Transport: tr,
+					Timeout:   time.Second * 120,
+				}
+				/*
 				if words[0]!="github.com" {
 					// 还可以在 pkg 上查一下，获取 github 仓库 url
 					fmt.Println("??????")
+					"https://libraries.io/api/Go/" + url + "?api_key=e62789dbaf90f44bd4aee211df8cc8e7"
 					return nil, false, errors.New("!")
-				}
+				}*/
 
-				// consider virtual Path
+				// consider target virtual Path
 				flagVirtual := true
-				if words[len(words)-1][0] == 'V' {
+				if words[len(words)-1][0] == 'v' {
 					for _, v :=range words[len(words)-1][1:] {
 						if v < '0' && v>'9'{
 							flagVirtual = false
@@ -280,28 +294,27 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 				}
 
 				finalPath = strings.Join(strings.Split(filepath.Join(urlPath, actual.Path), "\\"), "/")
-				//fmt.Println(finalPath)
-
-				//set proxy
-				proxyUrl := "http://127.0.0.1:7890"
-				proxy, _ := url.Parse(proxyUrl)
-				tr := &http.Transport{
-					Proxy:           http.ProxyURL(proxy),
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				}
-				httpClient := &http.Client{
-					Transport: tr,
-					Timeout:   time.Second * 120,
-				}
+				//fmt.Println(flagVirtual, finalPath)
+				
 				
 				var finalVersion string
 				if v := strings.Split(target.Version, "-"); len(v)>2 {
 					finalVersion = v[len(v)-1]
-				} else if v:= strings.Split(target.Version, "+"); len(v) > 1{
-					finalVersion = v[0]
-				} else{
-					finalVersion = target.Version
+				} else {
+					// submodule label?
+					labelPrefix := ""
+					if v := strings.Split(urlPath, "/"); len(v)>3{
+						labelPrefix = strings.Join(v[3:], "/")
+					}	
+					//fmt.Println(labelPrefix)
+					if v:= strings.Split(target.Version, "+"); len(v) > 1{
+						finalVersion = labelPrefix + v[0]
+					} else{
+						finalVersion = labelPrefix + "/" + target.Version
+					}
 				}
+				//fmt.Println(finalVersion)
+
 				//fmt.Println("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
 				resp, _ := httpClient.Get("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
 				// consider subdirectory
@@ -311,7 +324,7 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 				}
 				
 				modFile, _ := ioutil.ReadAll(resp.Body)
-				fmt.Println(string(modFile))
+				//fmt.Println(string(modFile))
 				parseModFile(string(modFile), &currentModInfo)
 			}
 		}
