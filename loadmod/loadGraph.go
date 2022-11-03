@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"path/filepath"
 	"strings"
 	"time"
-	"io/ioutil"
-	"log"
 
 	"github.com/yangshenyi/ymodule/mymvs"
 	"go.mongodb.org/mongo-driver/bson"
@@ -17,9 +17,9 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
+	"crypto/tls"
 	"net/http"
 	"net/url"
-	"crypto/tls"
 )
 
 type Version struct {
@@ -62,56 +62,56 @@ func replacement(mod module.Version, replace map[module.Version]module.Version) 
 	if r, ok := replace[mod]; ok {
 		return mod.Version, r
 	}
-	if r, ok := replace[module.Version{Path: mod.Path, Version:""}]; ok {
+	if r, ok := replace[module.Version{Path: mod.Path, Version: ""}]; ok {
 		return "", r
 	}
 	return "", mod
 }
 
-func parseModFile(modFile string, recv * modInfo){
-		lines := strings.Split(string(modFile), "\n")
-		if len(lines)<2 {
-			return
+func parseModFile(modFile string, recv *modInfo) {
+	lines := strings.Split(string(modFile), "\n")
+	if len(lines) < 2 {
+		return
+	}
+	flag := false
+	for _, line := range lines {
+		var words []string = strings.Fields(line)
+		//fmt.Println(modInfo[index])
+		if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
+			continue
+		} else if words[0] == "module" {
+			recv.Mod.ModulePath = words[1]
+		} else if words[0] == "go" {
+			recv.Mod.GoVersion = words[1]
+		} else if words[0] == ")" {
+			flag = false
+		} else if flag {
+			if len(words) == 1 {
+				log.Fatal("local replace: resolve fail[0]")
+				break
+			} else if len(words) == 2 {
+				recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[0], Version: words[1]})
+			} else {
+				recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[0], Version: words[1]})
+			}
+		} else if words[0] == "require" {
+			if words[1] == "(" {
+				flag = true
+			} else if words[1] == "()" {
+				continue
+			} else {
+				if len(words) < 3 {
+					log.Fatal("local replace: resolve fail[1]")
+					break
+				}
+				if len(words) == 3 {
+					recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[1], Version: words[2]})
+				} else {
+					recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[1], Version: words[2]})
+				}
+			}
 		}
-		flag := false
-		for _, line := range lines {
-				var words []string = strings.Fields(line)
-				//fmt.Println(modInfo[index])
-				if len(words) == 0 || words[0] == "" || words[0][0] == '/' && words[0][1] == '/' {
-					continue
-				} else if words[0] == "module" {
-					recv.Mod.ModulePath = words[1]
-				} else if words[0] == "go" {
-					recv.Mod.GoVersion = words[1]
-				} else if words[0] == ")" {
-					flag = false
-				} else if flag {
-					if len(words) == 1 {
-						log.Fatal("local replace: resolve fail[0]")
-						break
-					} else if len(words) == 2 {
-						recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[0], Version: words[1]})
-					} else {
-						recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[0], Version: words[1]})
-					}
-				} else if words[0] == "require" {
-					if words[1] == "(" {
-						flag = true
-					} else if words[1] == "()" {
-						continue
-					} else {
-						if len(words) < 3 {
-							log.Fatal("local replace: resolve fail[1]")
-							break
-						}
-						if len(words) == 3 {
-							recv.Mod.DirRequire = append(recv.Mod.DirRequire, Version{Path: words[1], Version: words[2]})
-						} else {
-							recv.Mod.IndirRequire = append(recv.Mod.IndirRequire, Version{Path: words[1], Version: words[2]})
-						}
-					}
-				} 
-		}
+	}
 }
 
 func getRequiredList(modinfo modInfo, excludeInfo map[module.Version]bool) []module.Version {
@@ -233,7 +233,7 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 	//expandingQueue := make(map[module.Version]bool, len(roots))
 	// load transitive dependency
 	// add successor nodes of selected node with replace and exclude applied
-	
+
 	loadOne := func(m module.Version) ([]module.Version, bool, error) {
 		_, actual := replacement(m, replaceInfo)
 
@@ -246,13 +246,13 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 				fmt.Println(err, "read current module", m.Path, m.Version, "=>", actual.Path, actual.Version, "mod file fail! [1]")
 				return nil, false, err
 			}
-		// resolve local path
-		}else{
+			// resolve local path
+		} else {
 			var finalPath string = ""
 			if filepath.IsAbs(actual.Path) {
 				fmt.Println("abs")
 				return nil, false, errors.New("!")
-			}else {
+			} else {
 				//fmt.Println(target.Path)
 				urlPath := target.Path
 				words := strings.Split(urlPath, "/")
@@ -269,23 +269,23 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 					Timeout:   time.Second * 120,
 				}
 				/*
-				if words[0]!="github.com" {
-					// 还可以在 pkg 上查一下，获取 github 仓库 url
-					fmt.Println("??????")
-					"https://libraries.io/api/Go/" + url + "?api_key=e62789dbaf90f44bd4aee211df8cc8e7"
-					return nil, false, errors.New("!")
-				}*/
+					if words[0]!="github.com" {
+						// 还可以在 pkg 上查一下，获取 github 仓库 url
+						fmt.Println("??????")
+						"https://libraries.io/api/Go/" + url + "?api_key=e62789dbaf90f44bd4aee211df8cc8e7"
+						return nil, false, errors.New("!")
+					}*/
 
 				// consider target virtual Path
 				flagVirtual := true
 				if words[len(words)-1][0] == 'v' {
-					for _, v :=range words[len(words)-1][1:] {
-						if v < '0' && v>'9'{
+					for _, v := range words[len(words)-1][1:] {
+						if v < '0' && v > '9' {
 							flagVirtual = false
 							break
 						}
 					}
-				} else{
+				} else {
 					flagVirtual = false
 				}
 
@@ -295,21 +295,20 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 
 				finalPath = strings.Join(strings.Split(filepath.Join(urlPath, actual.Path), "\\"), "/")
 				//fmt.Println(flagVirtual, finalPath)
-				
-				
+
 				var finalVersion string
-				if v := strings.Split(target.Version, "-"); len(v)>2 {
+				if v := strings.Split(target.Version, "-"); len(v) > 2 {
 					finalVersion = v[len(v)-1]
 				} else {
 					// submodule label?
 					labelPrefix := ""
-					if v := strings.Split(urlPath, "/"); len(v)>3{
+					if v := strings.Split(urlPath, "/"); len(v) > 3 {
 						labelPrefix = strings.Join(v[3:], "/")
-					}	
+					}
 					//fmt.Println(labelPrefix)
-					if v:= strings.Split(target.Version, "+"); len(v) > 1{
+					if v := strings.Split(target.Version, "+"); len(v) > 1 {
 						finalVersion = labelPrefix + v[0]
-					} else{
+					} else {
 						finalVersion = labelPrefix + "/" + target.Version
 					}
 				}
@@ -322,17 +321,20 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 					finalPath = strings.Join(strings.Split(filepath.Join(target.Path, actual.Path), "\\"), "/")
 					resp, _ = httpClient.Get("https://raw.githubusercontent.com/" + words[1] + "/" + words[2] + "/" + finalVersion + "/" + strings.Join(strings.Split(finalPath, "/")[3:], "/") + "/go.mod")
 				}
-				
+
 				modFile, _ := ioutil.ReadAll(resp.Body)
 				//fmt.Println(string(modFile))
 				parseModFile(string(modFile), &currentModInfo)
 			}
 		}
-
-		requiredList := getRequiredList(currentModInfo, excludeInfo)
-		mg.Require(m, requiredList)
-
-		return requiredList, pruningForGoVersion(currentModInfo.Mod.GoVersion), nil
+		if reqs, ok:=mg.RequiredBy(m); !ok{
+			requiredList := getRequiredList(currentModInfo, excludeInfo)
+			mg.Require(m, requiredList)
+			return requiredList, pruningForGoVersion(currentModInfo.Mod.GoVersion), nil
+		}else{
+			return reqs[:len(reqs):len(reqs)], pruningForGoVersion(currentModInfo.Mod.GoVersion), nil
+		}
+		
 	}
 
 	var enqueue func(m module.Version, pruning bool)
@@ -340,21 +342,29 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 		if m.Version == "none" {
 			return
 		}
-		if _, ok := expandedQueue[m]; ok {
-			return
+
+		if !pruning {
+			if _, ok := expandedQueue[m]; ok {
+				return
+			}
 		}
+
 		requireList, curPruning, err := loadOne(m)
 		if err != nil {
 			return
 		}
-		expandedQueue[m] = true
+		
 
 		if !pruning || !curPruning {
 			nextPruning := curPruning
 			if !pruning {
 				nextPruning = false
 			}
+			expandedQueue[m] = true
 			for _, r := range requireList {
+				/*if r.Path == "github.com/go-kit/kit@v0.12.0" {{
+					fmt.Println(m, r)
+				}*/
 				enqueue(r, nextPruning)
 			}
 		}
@@ -364,6 +374,6 @@ func LoadModGraph(target module.Version) (*mymvs.Graph, bool, *map[module.Versio
 		//fmt.Println("((((((((", m)
 		enqueue(m, pruning)
 	}
-	
+
 	return mg, true, &replaceInfo
 }

@@ -9,7 +9,6 @@ import (
 	"golang.org/x/mod/module"
 )
 
-
 func runGraph(target module.Version) {
 	mg, ok, info := loadmod.LoadModGraph(target)
 	if !ok {
@@ -17,39 +16,39 @@ func runGraph(target module.Version) {
 
 	}
 	/*
-		w := bufio.NewWriter(os.Stdout)
-		defer w.Flush()
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
 
-		format := func(m module.Version) {
-			w.WriteString(m.Path)
-			if m.Version != "" {
-				w.WriteString("@")
-				w.WriteString(m.Version)
-			}
+	format := func(m module.Version) {
+		w.WriteString(m.Path)
+		if m.Version != "" {
+			w.WriteString("@")
+			w.WriteString(m.Version)
 		}
+	}
 
-		mg.WalkBreadthFirst(func(m module.Version) {
-			reqs, _ := mg.RequiredBy(m)
-			for _, r := range reqs {
-				format(m)
-				w.WriteByte(' ')
-				format(r)
-				w.WriteByte('\n')
-			}
-		})*/
+	mg.WalkBreadthFirst(func(m module.Version) {
+		reqs, _ := mg.RequiredBy(m)
+		for _, r := range reqs {
+			format(m)
+			w.WriteByte(' ')
+			format(r)
+			w.WriteByte('\n')
+		}
+	})*/
 	//fmt.Println(*info, "\n\n")
 	//fmt.Println(mg. Selected("null"))
 	
-	for _, v := range mg.BuildList() {
-		if k, ok := (*info)[v]; ok {
-			fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
-		} else if k, ok := (*info)[module.Version{Path: v.Path, Version: ""}]; ok {
-			fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
-		} else {
-			fmt.Println(v.Path, v.Version)
-		}
+		for _, v := range mg.BuildList() {
+			if k, ok := (*info)[v]; ok {
+				fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
+			} else if k, ok := (*info)[module.Version{Path: v.Path, Version: ""}]; ok {
+				fmt.Println(v.Path, v.Version, "=>", k.Path, k.Version)
+			} else {
+				fmt.Println(v.Path, v.Version)
+			}
 
-	}
+		}
 
 }
 

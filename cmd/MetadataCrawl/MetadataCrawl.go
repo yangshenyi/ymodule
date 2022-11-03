@@ -39,8 +39,9 @@ type dep struct {
 	} `bson:"mod"`
 	HasValidMod int `bson:"HasValidMod"`
 	//IsValidGo   bool `bson:"IsValidGo"`
-	IsOnPkg bool   `bson:"IsOnPkg"`
 	modFile string `bson:"modFile"`
+	IsOnPkg bool   `bson:"IsOnPkg"`
+	
 }
 
 var numOfThread int = 0
@@ -77,7 +78,7 @@ func trans(src string) string {
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
-	for index, val := range modInfo {
+	for index, val := range modInfo[:2] {
 		resp, err := client.Get("https://goproxy.cn/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
@@ -216,7 +217,6 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		}
 		resp.Body.Close()
 
-		//modInfo[index].IsValidGo = modInfo[index].IsOnPkg || modInfo[index].HasValidMod == 1
 		//Path and modulePath is different
 		if modInfo[index].HasValidMod == 1 {
 			//fmt.Println("--------------", modInfo[index])
@@ -228,19 +228,16 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 				modInfo[index].HasValidMod = -2
 			}
 		}
-		/*if modInfo[index].HasValidMod == 0 {
-			//fmt.Println("****************\n", modInfo[index].Path)
-			fmt.Println(modInfo[index])
-		}*/
-		//fmt.Println(modInfo[index].Path, modInfo[index].Version, modInfo[index].HasValidMod)
+		
 	}
-	//fmt.Println(modInfo)
+	
 	//store into DB
-
 	newValue := make([]interface{}, 0)
-	for _, v := range modInfo[1:] {
+	for _, v := range modInfo[:2] {
 		newValue = append(newValue, v)
 	}
+	fmt.Println(newValue)
+	
 	muxDB.Lock()
 	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0], modInfo[0].CacheTime)
 	collection.InsertMany(context.TODO(), newValue)
@@ -286,7 +283,7 @@ func main() {
 	}
 
 	//initialize the crawl location
-	lastModCacheTime := "2022-08-25T23:59:55.333355Z"
+	lastModCacheTime := "2022-08-31T00:54:05.916861Z"
 
 	for {
 		if lastModCacheTime > "2022-08-31" {
