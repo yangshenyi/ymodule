@@ -39,9 +39,13 @@ type dep struct {
 	} `bson:"mod"`
 	HasValidMod int `bson:"HasValidMod"`
 	//IsValidGo   bool `bson:"IsValidGo"`
-	modFile string `bson:"modFile"`
+	ModFile string `json:"modFile" bson:"ModFile"`
 	IsOnPkg bool   `bson:"IsOnPkg"`
 	
+}
+
+type test struct {
+	Path string `bson:"Path"`
 }
 
 var numOfThread int = 0
@@ -78,7 +82,11 @@ func trans(src string) string {
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
-	for index, val := range modInfo[:2] {
+	//fmt.Println(modInfo)
+	for index, val := range modInfo {
+		if index == 0 {
+			continue
+		}
 		resp, err := client.Get("https://goproxy.cn/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
@@ -101,7 +109,7 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 			//parse mod file
 			lines = strings.Split(string(modtext), "\n")
 		}
-		modInfo[index].modFile = string(modtext)
+		modInfo[index].ModFile = string(modtext)
 
 		if modInfo[index].HasValidMod == -3 {
 		} else if len(lines) > 2 {
@@ -129,6 +137,11 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 						modInfo[index].Mod.IndirRequire = append(modInfo[index].Mod.IndirRequire, module{Path: words[0], Version: words[1]})
 					}
 				} else if flagList[1] {
+					//fmt.Println(len(modInfo), index,modInfo[index])
+					if len(words)<2 {
+						modInfo[index].HasValidMod = -1
+						break
+					}
 					modInfo[index].Mod.Exclude = append(modInfo[index].Mod.Exclude, module{Path: words[0], Version: words[1]})
 				} else if flagList[2] {
 					modInfo[index].Mod.Replace = append(modInfo[index].Mod.Replace, line)
@@ -233,24 +246,28 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	
 	//store into DB
 	newValue := make([]interface{}, 0)
-	for _, v := range modInfo[:2] {
+	for _, v := range modInfo[1:] {
 		newValue = append(newValue, v)
 	}
-	fmt.Println(newValue)
+	//fmt.Println(newValue)
 	
 	muxDB.Lock()
 	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0], modInfo[0].CacheTime)
-	collection.InsertMany(context.TODO(), newValue)
+	_, err := collection.InsertMany(context.TODO(), newValue)
+	if err != nil {
+		log.Fatal(err)
+	}
 	muxDB.Unlock()
 	muxThread.Lock()
 	numOfThread--
 	muxThread.Unlock()
+
 }
 
 func main() {
 	//set core
 	runtime.GOMAXPROCS(runtime.NumCPU()) // 12 cores on my PC
-	maxThread := 8
+	maxThread := 12
 	//Connect to mongodb
 	var (
 		client     *mongo.Client
@@ -283,10 +300,10 @@ func main() {
 	}
 
 	//initialize the crawl location
-	lastModCacheTime := "2022-08-31T00:54:05.916861Z"
+	lastModCacheTime := "2022-11-01T00:22:02.147964Z"
 
 	for {
-		if lastModCacheTime > "2022-08-31" {
+		if lastModCacheTime > "2022-11-12" {
 			for numOfThread > 0 {
 			}
 			fmt.Println("\n\n********************", lastModCacheTime)

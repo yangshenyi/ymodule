@@ -7,11 +7,49 @@ import (
 
 	"github.com/yangshenyi/ymodule/loadmod"
 	"golang.org/x/mod/module"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"crypto/tls"
+	"net/http"
+	"net/url"
+	"time"
+	"go.mongodb.org/mongo-driver/mongo"
+	"context"
 )
 
 func runGraph(target module.Version) {
-	mg, ok, info := loadmod.LoadModGraph(target)
-	if !ok {
+	// connect mongodb
+	var (
+		client     *mongo.Client
+		err        error
+		db         *mongo.Database
+		collection *mongo.Collection
+	)
+	if client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI("mongodb://localhost:27017").SetConnectTimeout(10*time.Second)); err != nil {
+		fmt.Print(err)
+		return 
+	}
+	defer func() {
+		if err := client.Disconnect(context.TODO()); err != nil {
+			panic(err)
+		}
+	}()
+	db = client.Database("godep")
+	collection = db.Collection("modData")
+
+	//set proxy
+	proxyUrl := "http://127.0.0.1:7890"
+	proxy, _ := url.Parse(proxyUrl)
+	tr := &http.Transport{
+		Proxy:           http.ProxyURL(proxy),
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	httpClient := &http.Client{
+		Transport: tr,
+		Timeout:   time.Second * 120,
+	}
+
+	mg, ok, info := loadmod.LoadModGraph(target, collection, httpClient)
+	if ok!=1 {
 		fmt.Println("load Graph fail[!]", info)
 
 	}
@@ -57,6 +95,9 @@ func main() {
 	// runGraph(module.Version{Path: "google.golang.org/protobuf", Version: "v1.26.0"})
 
 	// runGraph(module.Version{Path: "go.mongodb.org/mongo-driver", Version: "v1.10.1"})
+
+	
+
 	if len(os.Args) != 3 {
 		fmt.Println("illegal num of cmd parameters!")
 		return

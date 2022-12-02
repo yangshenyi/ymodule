@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	//"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -36,9 +37,15 @@ type dep struct {
 		Replace      []string `bson:"Replace"`
 		Retract      []string `bson:"Retract"`
 	} `bson:"mod"`
-	HasValidMod int  `bson:"HasValidMod"`
-	IsValidGo   bool `bson:"IsValidGo"`
-	IsOnPkg     bool `bson:"IsOnPkg"`
+	HasValidMod int `bson:"HasValidMod"`
+	//IsValidGo   bool `bson:"IsValidGo"`
+	ModFile string `json:"modFile" bson:"ModFile"`
+	IsOnPkg bool   `bson:"IsOnPkg"`
+	
+}
+
+type test struct {
+	Path string `bson:"Path"`
 }
 
 var numOfThread int = 0
@@ -71,12 +78,15 @@ func trans(src string) string {
 	return ret
 }
 
-//each time, we parse 2000 records
+//each time, we parse 1999 records
 //if fail, write the cachetime of first record and err info into a log file to reparse
 func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 	fmt.Println(modInfo[0].Path, modInfo[0].CacheTime)
 	for index, val := range modInfo {
-		resp, err := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
+		if index == 0 {
+			continue
+		}
+		resp, err := client.Get("https://goproxy.cn/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
 		modInfo[index].HasValidMod = 1
 		var modtext []byte
 		var lines []string
@@ -85,12 +95,20 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 			modInfo[index].HasValidMod = -3
 		} else {
 			if resp.StatusCode != 200 {
-				modInfo[index].HasValidMod = 0
+				resp, err = client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
+				if err != nil {
+					expHandler(modInfo[0].CacheTime, err)
+					modInfo[index].HasValidMod = -3
+				} else {
+					modInfo[index].HasValidMod = 0
+					fmt.Println(modInfo[index])
+				}
 			}
 			modtext, _ = ioutil.ReadAll(resp.Body)
 			//parse mod file
 			lines = strings.Split(string(modtext), "\n")
 		}
+		modInfo[index].ModFile = string(modtext)
 
 		if modInfo[index].HasValidMod == -3 {
 		} else if len(lines) > 2 {
@@ -206,7 +224,6 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 		}
 		resp.Body.Close()
 
-		modInfo[index].IsValidGo = modInfo[index].IsOnPkg || modInfo[index].HasValidMod == 1
 		//Path and modulePath is different
 		if modInfo[index].HasValidMod == 1 {
 			//fmt.Println("--------------", modInfo[index])
@@ -218,26 +235,27 @@ func parse(modInfo []dep, client *http.Client, collection *mongo.Collection) {
 				modInfo[index].HasValidMod = -2
 			}
 		}
-		/*if modInfo[index].HasValidMod == 0 {
-			//fmt.Println("****************\n", modInfo[index].Path)
-			fmt.Println(modInfo[index])
-		}*/
-		//fmt.Println(modInfo[index].Path, modInfo[index].Version, modInfo[index].HasValidMod)
+		
 	}
-	//fmt.Println(modInfo)
+	
 	//store into DB
-
 	newValue := make([]interface{}, 0)
 	for _, v := range modInfo {
 		newValue = append(newValue, v)
 	}
+	//fmt.Println(newValue)
+	
 	muxDB.Lock()
 	fmt.Println("\n\n\n\n\n", numOfThread, "\n", newValue[0], modInfo[0].CacheTime)
-	collection.InsertMany(context.TODO(), newValue)
+	_, err := collection.InsertMany(context.TODO(), newValue)
+	if err != nil {
+		log.Fatal(err)
+	}
 	muxDB.Unlock()
 	muxThread.Lock()
 	numOfThread--
 	muxThread.Unlock()
+
 }
 
 func main() {
@@ -275,39 +293,6 @@ func main() {
 		Timeout:   time.Second * 120,
 	}
 
-	//initialize the crawl location
-	//lastModCacheTime := "2022-08-25T09:15:51.774796Z"
-	/*
-		for {
-
-
-			resp, err := httpClient.Get("https://index.golang.org/index?since=" + lastModCacheTime)
-			if err != nil {
-				expHandler(lastModCacheTime, err)
-				for numOfThread > 0 {
-				}
-				return
-			}
-			resp.Close = true
-			var modIndexes []dep
-			dec := json.NewDecoder(resp.Body)
-			for dec.More() {
-				var modIndex dep
-				if err := dec.Decode(&modIndex); err != nil {
-					expHandler(lastModCacheTime, err)
-					for numOfThread > 0 {
-					}
-					return
-				}
-				modIndexes = append(modIndexes, modIndex)
-			}
-			//index done
-			if len(modIndexes) == 1 {
-				break
-			}
-			lastModCacheTime = modIndexes[len(modIndexes)-1].CacheTime
-	*/
-
 	file, err := os.Open("./left.txt")
 	if err != nil {
 		panic(err)
@@ -324,108 +309,19 @@ func main() {
 		//fmt.Println(temp.CacheTime[len(temp.CacheTime)-1])
 		modIndexes = append(modIndexes, temp)
 	}
-
-	//limit the num of goroutine
-	/*
-		for numOfThread >= maxThread {
-		}
+/*
+	for i:=0; i<1999; i+=1999/12{
 		muxThread.Lock()
 		numOfThread++
 		muxThread.Unlock()
-	*/
-	parse(modIndexes, httpClient, collection)
-
+		if i+1999/12 < 1999{
+			go parse(modIndexes[i:i+1999/10], httpClient, collection)
+		} else{
+			go parse(modIndexes[i:], httpClient, collection)
+		}
+	}*/
+	parse(modIndexes,  httpClient, collection)
+	//no parsing goroutine exists, then all done
+	for numOfThread > 0 {
+	}
 }
-
-/*
-	create table if not exists `goversion`(
-		`id` int unsigned auto_increment,
-		`path` varchar(100) not null,
-		`version` varchar(100) not null,
-		`timestamp` varchar(40) not null,
-		`publishtime` varchar(40) not null,
-		`isGopackage`    boolean default false,
-		`isVersionOnDev` boolean default false,
-		`validgomod` boolean default false,
-		primary key(id)
-		)ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=UTF8MB4 ;
-*/
-
-/*
-func Parse(mod []module, client *http.Client, quit chan bool, db *sql.DB) {
-	stmt, err := db.Prepare("INSERT INTO goversion(path, version, timestamp, publishtime, isGopackage, isVersionOnDev, validgomod) VALUES(?,?,?,?,?,?,?)")
-	if err != nil {
-		log.Fatal(err, "!!!")
-	}
-	defer stmt.Close()
-
-	for _, val := range mod {
-		//package on pkg.go.dev？
-		resp, err := client.Head("https://pkg.go.dev/" + val.Path)
-		if err != nil {
-			log.Fatal("[Error]", err, 1, val)
-		}
-		if resp.StatusCode == 200 {
-			val.IsPackageOnDev = true
-			respMod, errMod := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".mod")
-			if errMod != nil {
-				log.Fatal("[Error]", err, 2, val)
-			}
-
-			if respMod.StatusCode == 200 {
-				bytesmod, _ := ioutil.ReadAll(respMod.Body)
-				s := string(bytesmod)
-				if len(strings.Split(s, " ")) > 2 {
-					val.ValidMod = true
-				}
-			}
-			respMod.Body.Close()
-
-			//Publish Time
-			//$base/$module/@v/$version.info
-			respPubTime, errPubTime := client.Get("https://proxy.golang.org/" + trans(val.Path) + "/@v/" + trans(val.Version) + ".info")
-			if errPubTime != nil {
-				log.Fatal("[Error]", err, 3, val)
-			}
-
-			if respPubTime.StatusCode == 200 {
-				dec := json.NewDecoder(respPubTime.Body)
-				var temp publishTime
-				dec.Decode(&temp)
-				val.publishTime = temp.Time
-			}
-			respPubTime.Body.Close()
-
-
-			//version on pkg.go.dev?
-			respVersion, errVersion := client.Head("https://pkg.go.dev/" + val.Path + "@" + val.Version)
-			if errVersion != nil {
-				log.Fatal("[Error]", err, 4, val)
-			}
-			if respVersion.StatusCode == 200 {
-				val.IsVersionOnDev = true
-				/*
-					//valid mod file?
-					doc, err := goquery.NewDocumentFromReader(respVersion.Body)
-					if err != nil {
-						log.Fatal(err)
-					}
-					doc.Find("ul.UnitMeta-details").Each(func(i int, s *goquery.Selection) {
-						if _, ok := s.Find("li").Eq(0).Find("a").Attr("href"); ok {
-							val.ValidMod = true
-						}
-					})
-			}
-			respVersion.Body.Close()
-		}
-		resp.Body.Close()
-
-		_, err1 := stmt.Exec(val.Path, val.Version, val.Timestamp, val.publishTime, val.IsPackageOnDev, val.IsVersionOnDev, val.ValidMod)
-		if err1 != nil {
-			log.Fatal(err, 6, val)
-		}
-
-		//fmt.Println(val)
-	}
-	quit <- true
-}*/
