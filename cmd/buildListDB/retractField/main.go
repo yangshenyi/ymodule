@@ -3,9 +3,11 @@ package main
 import (
 	//"bufio"
 
+	"bufio"
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -29,11 +31,13 @@ type BLEle struct {
 }
 
 type BLDBEle struct {
-	ID        primitive.ObjectID `json:"_id" bson:"_id"`
-	Path      string             `json:"Path" bson:"Path"`
-	Version   string             `json:"Version" bson:"Version"`
-	BuildList []BLEle            `bson:"BuildList"`
-	State     int                `bson:"State"`
+	ID          primitive.ObjectID `json:"_id" bson:"_id"`
+	Path        string             `json:"Path" bson:"Path"`
+	Version     string             `json:"Version" bson:"Version"`
+	BuildList   []BLEle            `bson:"BuildList"`
+	State       int                `bson:"State"`
+	Retracted   bool               `bson:"Retracted"`
+	PublishTime string             `bson:"PublishTime"`
 }
 
 type versionRange struct {
@@ -106,6 +110,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	file, err := os.OpenFile("retractversion.csv", os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Println("文件打开失败", err)
+	}
+	write := bufio.NewWriter(file)
+
 	count := 0
 	num := 0
 	for cur.Next(context.TODO()) {
@@ -118,8 +128,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if elem.State != 1 {
-			//write.WriteString(fmt.Sprintln(elem.Path, elem.Version, elem.State))
+		if elem.State == 1 {
+			if elem.Retracted {
+				write.WriteString(fmt.Sprintln(elem.Path, elem.Version, elem.PublishTime))
+			}
+			continue
+		} else {
 			continue
 		}
 
@@ -148,5 +162,8 @@ func main() {
 		}
 
 	}
-
+	write.Flush()
+	file.Close()
 }
+
+// 2332	26

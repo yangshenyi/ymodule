@@ -193,7 +193,7 @@ func LoadModGraph(target module.Version, collection *mongo.Collection, httpClien
 		}
 		if words[0] == "//" {
 			continue
-		}else if len(words) <= 3{
+		} else if len(words) <= 3 {
 			continue
 		} else if words[1] == "=>" {
 			if len(words) == 3 {
@@ -363,7 +363,7 @@ func LoadModGraph(target module.Version, collection *mongo.Collection, httpClien
 	enqueue = func(m module.Version, pruning bool) {
 		if m.Version == "none" {
 			return
-		} else if v := strings.Split(target.Version, "+"); v[len(v)-1] == "incompatible"{
+		} else if v := strings.Split(target.Version, "+"); v[len(v)-1] == "incompatible" {
 			return
 		}
 
